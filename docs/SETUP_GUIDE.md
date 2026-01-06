@@ -55,6 +55,23 @@ Then run `uv sync` again.
 
 ---
 
+### 5. Mid-Training OOM on Single GPU
+
+**Problem:** Mid-training crashes with OOM on single H100 using default `device_batch_size=32`.
+
+**Fix:** Reduce batch size to match base training:
+```bash
+uv run python -m scripts.mid_train \
+  --model_tag=d34 \
+  --model_step=169150 \
+  --device_batch_size=4 \
+  --run=d34-mid
+```
+
+Memory usage: ~56GB with batch_size=4 vs 79GB+ with batch_size=32.
+
+---
+
 ### 4. Loading Specific Checkpoints
 
 Always specify `--step` to load the correct model:
@@ -75,14 +92,16 @@ Without `--step`, it auto-selects the last checkpoint in the directory.
 ```
 Pretrained Model (from HuggingFace)
         |
-   [Optional] Mid-Training (--source=base)
+   Mid-Training (--source=base)      ← RECOMMENDED, not optional!
         |
-   Chat SFT (--source=base or --source=mid)
+   Chat SFT (--source=mid)
         |
    [Optional] RL (--source=sft)
         |
    Chat Model (ready to deploy)
 ```
+
+**Important:** Skipping mid-training produces a poor chat model. The base model only learned language patterns, not conversational ability. Mid-training teaches reasoning, math, and conversation structure.
 
 ---
 
