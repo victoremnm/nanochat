@@ -177,6 +177,150 @@ Then open `http://localhost:8000`
 
 | Task | GPU | Time | Cost |
 |------|-----|------|------|
-| SFT (d34, 1 epoch) | H100 80GB | ~30-60 min | ~$2-4 |
-| Mid-training (d34) | 8x H100 | ~2-4 hours | ~$40-80 |
-| Inference testing | H100 80GB | ~10 min | ~$0.50 |
+| Mid-training (d34) | 1x H100 80GB | ~5.5 hours | ~$14 |
+| SFT (d34, 1 epoch) | 1x H100 80GB | ~30-60 min | ~$1-2 |
+| Inference testing | 1x H100 80GB | ~10 min | ~$0.50 |
+| **Total** | | **~6.5 hours** | **~$16** |
+
+---
+
+## Complete Training Workflow (Tested)
+
+This is the exact workflow that produced a working chat model:
+
+### 1. Setup Lambda H100
+```bash
+ssh ubuntu@<lambda-ip>
+
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.local/bin/env
+
+# Clone and setup
+git clone https://github.com/karpathy/nanochat.git
+cd nanochat
+uv sync
+uv pip install huggingface_hub
+```
+
+### 2. Download Pretrained Model
+```bash
+uv run huggingface-cli download karpathy/nanochat-d34 --local-dir ~/nanochat-d34
+```
+
+### 3. Setup Directory Structure (CRITICAL)
+```bash
+mkdir -p ~/.cache/nanochat/tokenizer
+mkdir -p ~/.cache/nanochat/base_checkpoints/d34
+
+# Tokenizer
+cp ~/nanochat-d34/token_bytes.pt ~/.cache/nanochat/tokenizer/
+cp ~/nanochat-d34/tokenizer.pkl ~/.cache/nanochat/tokenizer/
+
+# Model -> base_checkpoints (NOT chatsft_checkpoints!)
+cp ~/nanochat-d34/model_169150.pt ~/.cache/nanochat/base_checkpoints/d34/
+cp ~/nanochat-d34/meta_169150.json ~/.cache/nanochat/base_checkpoints/d34/
+
+# Identity conversations
+curl -L -o ~/.cache/nanochat/identity_conversations.jsonl \
+  https://karpathy-public.s3.us-west-2.amazonaws.com/identity_conversations.jsonl
+```
+
+### 4. Run Mid-Training (~5.5 hours)
+```bash
+# Use device_batch_size=4 to avoid OOM!
+nohup uv run python -m scripts.mid_train \
+  --model_tag=d34 \
+  --model_step=169150 \
+  --device_batch_size=4 \
+  --run=d34-mid > mid_train.log 2>&1 &
+
+# Monitor
+tail -f mid_train.log
+nvidia-smi  # Should show ~56GB usage
+```
+
+**Expected output when complete:**
+```
+Step 00813 (100.00%) | loss: 1.068
+Minimum validation bpb: 0.3282
+```
+
+### 5. Run SFT (~30-60 min)
+```bash
+uv run python -m scripts.chat_sft \
+  --source=mid \
+  --model_tag=d34 \
+  --run=d34-sft
+```
+
+**Expected output when complete:**
+```
+Step 00700 | mmlu_acc: 0.425781, arc_easy_acc: 0.719727
+✅ Saved model checkpoint to /home/ubuntu/.cache/nanochat/chatsft_checkpoints/d34
+```
+
+### 6. Test
+```bash
+uv run python -m scripts.chat_web \
+  --source=sft \
+  --model-tag=d34 \
+  --step=700 \
+  --temperature=0.6
+```
+
+From local machine:
+```bash
+ssh -L 8000:localhost:8000 ubuntu@<lambda-ip>
+# Open http://localhost:8000
+```
+
+### 7. Download Models Before Terminating
+```bash
+# On server - create tarball
+cd ~/.cache/nanochat
+tar -czvf ~/nanochat-d34-trained.tar.gz \
+  tokenizer/ \
+  mid_checkpoints/d34/ \
+  chatsft_checkpoints/d34/
+
+# On local machine - download
+scp ubuntu@<lambda-ip>:~/nanochat-d34-trained.tar.gz ~/Downloads/
+
+# Extract and setup locally
+cd ~/Downloads
+tar -xzvf nanochat-d34-trained.tar.gz
+cp -r tokenizer ~/.cache/nanochat/
+cp -r mid_checkpoints ~/.cache/nanochat/
+cp -r chatsft_checkpoints ~/.cache/nanochat/
+```
+
+---
+
+## Expected Model Quality
+
+| Metric | Without Mid-Training | With Mid-Training |
+|--------|---------------------|-------------------|
+| MMLU Accuracy | 25% (random) | 42.6% |
+| ARC-Easy Accuracy | 30% | 72% |
+| Chat Quality | Gibberish | Coherent conversations |
+| Math | Broken | Basic arithmetic works |
+| Code Generation | Broken | Working code |
+
+---
+
+## Best Practices
+
+1. **Never skip mid-training** - It's the difference between gibberish and a working model
+
+2. **Always use `--device_batch_size=4`** for d34 on single GPU - Default of 32 causes OOM
+
+3. **Always specify `--step`** when loading models - Auto-selection can load wrong checkpoint
+
+4. **Put pretrained model in `base_checkpoints/`** - NOT `chatsft_checkpoints/`
+
+5. **Use SSH tunneling** for web UI - Cloud providers block port 8000
+
+6. **Download models before terminating** - You'll lose 6+ hours of work otherwise
+
+7. **Monitor with WandB** - Logs may be buffered, WandB shows real-time progress
