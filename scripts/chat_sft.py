@@ -61,6 +61,7 @@ parser.add_argument("--eval_steps", type=int, default=100, help="number of batch
 parser.add_argument("--eval_metrics_every", type=int, default=200, help="evaluate accuracy metrics every N steps")
 parser.add_argument("--eval_metrics_max_problems", type=int, default=1024, help="max problems per metric evaluation")
 parser.add_argument("--custom_data", type=str, default=None, help="path to custom JSONL training data")
+parser.add_argument("--custom_only", action="store_true", help="train ONLY on custom data (ignore base tasks)")
 args = parser.parse_args()
 user_config = vars(args).copy()
 # -----------------------------------------------------------------------------
@@ -85,20 +86,29 @@ engine = Engine(model, tokenizer) # will be used for inline model evaluation onl
 # -----------------------------------------------------------------------------
 # Task data mixture we'll train on
 identity_conversations_filepath = os.path.join(get_base_dir(), "identity_conversations.jsonl")
-tasks = [
-    ARC(subset="ARC-Easy", split="train"), # 2.3K rows
-    ARC(subset="ARC-Challenge", split="train"), # 1.1K rows
-    GSM8K(subset="main", split="train"), # 8K rows
-    SmolTalk(split="train", stop=10_000), # 10K rows of smoltalk
-    CustomJSON(filepath=identity_conversations_filepath), # 1K rows of synthetic identity conversations
-    SimpleSpelling(size=300, split="train"), # 300 rows of Simple Spelling (e.g. spell the word 'apple')
-    SpellingBee(size=300, split="train"), # 300 rows of Spelling Bee (e.g. how many 'r' are in 'strawberry'?)
-] # 2.3K + 1.1K + 8K + 10K + 1K + 0.3K + 0.3K = 23K rows
-# Add custom training data if provided
-if args.custom_data:
+
+if args.custom_only and args.custom_data:
+    # Train ONLY on custom data
     custom_data_path = os.path.expanduser(args.custom_data)
-    print0(f"Adding custom training data from: {custom_data_path}")
-    tasks.append(CustomJSON(filepath=custom_data_path))
+    print0(f"Training ONLY on custom data from: {custom_data_path}")
+    tasks = [CustomJSON(filepath=custom_data_path)]
+else:
+    # Standard task mixture
+    tasks = [
+        ARC(subset="ARC-Easy", split="train"), # 2.3K rows
+        ARC(subset="ARC-Challenge", split="train"), # 1.1K rows
+        GSM8K(subset="main", split="train"), # 8K rows
+        SmolTalk(split="train", stop=10_000), # 10K rows of smoltalk
+        CustomJSON(filepath=identity_conversations_filepath), # 1K rows of synthetic identity conversations
+        SimpleSpelling(size=300, split="train"), # 300 rows of Simple Spelling (e.g. spell the word 'apple')
+        SpellingBee(size=300, split="train"), # 300 rows of Spelling Bee (e.g. how many 'r' are in 'strawberry'?)
+    ] # 2.3K + 1.1K + 8K + 10K + 1K + 0.3K + 0.3K = 23K rows
+    # Add custom training data if provided
+    if args.custom_data:
+        custom_data_path = os.path.expanduser(args.custom_data)
+        print0(f"Adding custom training data from: {custom_data_path}")
+        tasks.append(CustomJSON(filepath=custom_data_path))
+
 train_ds = TaskMixture(tasks)
 val_ds = SmolTalk(split="test") # general conversations, 24K rows (though we don't actually use all of it)
 
