@@ -18,12 +18,13 @@ import time
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
+from contextlib import nullcontext
 
 import torch
 
-from nanochat.checkpoint_manager import CheckpointManager
-from nanochat.gpt import GPT, GPTConfig
-from nanochat.tokenizer import Tokenizer
+from nanochat.common import compute_init, autodetect_device_type
+from nanochat.checkpoint_manager import load_model as load_nanochat_model
+from nanochat.engine import Engine
 
 
 @dataclass
@@ -41,60 +42,53 @@ class EvalResult:
 
 
 def load_model(source: str, model_tag: str, step: Optional[int] = None):
-    """Load model and tokenizer."""
+    """Load model and tokenizer using NanoChat's checkpoint manager."""
     print(f"Loading model: source={source}, tag={model_tag}, step={step}")
 
-    # Load tokenizer
-    tokenizer = Tokenizer()
+    # Initialize device
+    device_type = autodetect_device_type()
+    ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
 
-    # Load checkpoint
-    cm = CheckpointManager()
-    ckpt_path, meta = cm.load_checkpoint(source, model_tag, step)
+    # Load model using NanoChat's loader
+    model, tokenizer, _ = load_nanochat_model(source, device, phase="eval", model_tag=model_tag, step=step)
 
-    print(f"Loaded checkpoint: {ckpt_path}")
+    # Create engine for generation
+    engine = Engine(model, tokenizer)
 
-    # Initialize model
-    config = GPTConfig(**meta["model_config"])
-    model = GPT(config)
-
-    # Load weights
-    state_dict = torch.load(ckpt_path, map_location="cpu", weights_only=True)
-    model.load_state_dict(state_dict)
-
-    # Move to GPU if available
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = model.to(device)
-    model.eval()
+    # Setup autocast
+    ptdtype = torch.bfloat16
+    autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype) if device_type == "cuda" else nullcontext()
 
     print(f"Model loaded on {device}")
-    return model, tokenizer, device
+    return engine, tokenizer, device, autocast_ctx
 
 
-def generate_response(model, tokenizer, device, prompt: str, max_tokens: int = 512, temperature: float = 0.3) -> str:
-    """Generate a response from the model."""
-    # Format as chat
-    chat_prompt = f"<|user|>\n{prompt}<|end|>\n<|assistant|>\n"
+def generate_response(engine, tokenizer, autocast_ctx, prompt: str, max_tokens: int = 512, temperature: float = 0.3) -> str:
+    """Generate a response from the model using the Engine."""
+    # Format as chat using special tokens
+    bos = tokenizer.get_bos_token_id()
+    user_start = tokenizer.encode_special("<|user_start|>")
+    user_end = tokenizer.encode_special("<|user_end|>")
+    assistant_start = tokenizer.encode_special("<|assistant_start|>")
 
-    # Tokenize
-    input_ids = tokenizer.encode(chat_prompt)
-    input_tensor = torch.tensor([input_ids], dtype=torch.long, device=device)
+    # Build token sequence: <bos><user_start>prompt<user_end><assistant_start>
+    prompt_tokens = tokenizer.encode(prompt)
+    input_tokens = [bos, user_start] + prompt_tokens + [user_end, assistant_start]
 
-    # Generate
-    with torch.no_grad():
-        output_ids = model.generate(
-            input_tensor,
-            max_new_tokens=max_tokens,
+    # Generate using engine
+    with autocast_ctx:
+        results, _ = engine.generate_batch(
+            input_tokens,
+            num_samples=1,
+            max_tokens=max_tokens,
             temperature=temperature,
             top_k=50,
-        )[0].tolist()
+            seed=42,
+        )
 
-    # Decode only the new tokens
-    response = tokenizer.decode(output_ids[len(input_ids):])
-
-    # Clean up response (stop at end token or next turn)
-    for stop in ["<|end|>", "<|user|>", "<|assistant|>"]:
-        if stop in response:
-            response = response.split(stop)[0]
+    # Decode only the generated tokens (after input)
+    generated_tokens = results[0][len(input_tokens):]
+    response = tokenizer.decode(generated_tokens)
 
     return response.strip()
 
@@ -132,7 +126,7 @@ def evaluate_response(response: str, expected_keywords: list[str], negative_keyw
     return expected_found, expected_missing, negative_found, score
 
 
-def run_eval(model, tokenizer, device, eval_file: str, category: Optional[str] = None, verbose: bool = True):
+def run_eval(engine, tokenizer, autocast_ctx, eval_file: str, category: Optional[str] = None, verbose: bool = True):
     """Run evaluation on all test cases."""
     results = []
 
@@ -152,7 +146,7 @@ def run_eval(model, tokenizer, device, eval_file: str, category: Optional[str] =
 
         # Generate response
         start_time = time.time()
-        response = generate_response(model, tokenizer, device, tc["question"])
+        response = generate_response(engine, tokenizer, autocast_ctx, tc["question"])
         gen_time = time.time() - start_time
 
         # Evaluate
@@ -244,10 +238,10 @@ def main():
     args = parser.parse_args()
 
     # Load model
-    model, tokenizer, device = load_model(args.source, args.model_tag, args.step)
+    engine, tokenizer, device, autocast_ctx = load_model(args.source, args.model_tag, args.step)
 
     # Run evaluation
-    results = run_eval(model, tokenizer, device, args.eval_file, args.category)
+    results = run_eval(engine, tokenizer, autocast_ctx, args.eval_file, args.category)
 
     # Print summary
     print_summary(results)

@@ -12,6 +12,24 @@ A living document tracking learnings, decisions, and progress for our NanoChat d
 
 **HuggingFace:** https://huggingface.co/victoremnm/nanochat-d34-sft
 
+### Model Use Case & Value
+
+**What the fine-tuned model provides:**
+- **Domain vocabulary** - Knows terms like "BonkBot", "swap_events", "geyser-geezer", "materializer"
+- **Business context** - Understands trading analytics, DEX patterns, holder tracking
+- **Codebase awareness** - Familiar with repository structures, API patterns, WebSocket topics
+- **Reasoning style** - Trained to answer in helpful, contextual ways for this domain
+
+**What MCP provides (defer evolving context):**
+- **Current table schemas** - DDLs that change over time
+- **SQL syntax** - Clickhouse/BigQuery dialect-specific patterns
+- **Documentation** - Always up-to-date API docs, function references
+
+**How to leverage:**
+1. Use fine-tuned model for **domain reasoning** (what tables to join, what metrics matter)
+2. Use MCP (Context7) for **SQL syntax** when writing queries
+3. Provide DDLs via MCP or prompt context for **current schema** info
+
 ---
 
 ## Training History
@@ -86,6 +104,38 @@ A living document tracking learnings, decisions, and progress for our NanoChat d
 | SQL Quality | Improved - better context awareness |
 
 **Key Finding:** Adding codebase training data improved MMLU by 0.58% (42.38% vs 41.80%), indicating better general reasoning. Slight decrease in ARC-Easy suggests tradeoff but overall model quality improved with more domain-specific context.
+
+### Session 4: Domain Evaluation & MCP Strategy (Jan 7, 2026)
+
+**Created evaluation framework** (`scripts/run_eval.py`, `evals/domain_eval.jsonl`) to test:
+- Clickhouse SQL syntax (LIMIT vs TOP, date functions, array functions)
+- Table/column knowledge
+- Codebase awareness
+- General reasoning
+
+**Evaluation Results:**
+
+| Model | Overall | Clickhouse SQL | Codebase | Reasoning |
+|-------|---------|----------------|----------|-----------|
+| Base (step 700) | 60% | 25% | 100% | 100% |
+| Custom (step 55) | 50% | 0% | 100% | 100% |
+
+**Key Finding:** Custom training maintained codebase/reasoning but **degraded** SQL syntax. Model outputs SQL Server syntax (`TOP 10`) instead of Clickhouse (`LIMIT 10`) due to pre-training bias.
+
+**Training data was correct** (140x `LIMIT`, 0x `TOP`), but pre-training habits override fine-tuning.
+
+**Decision: Use MCP for SQL Context**
+
+Rather than fight pre-training with more fine-tuning, defer SQL dialect knowledge to MCP:
+- **Fine-tuned model** → Domain reasoning, business logic, codebase awareness
+- **MCP (Context7)** → SQL syntax, table schemas, evolving patterns
+
+Benefits:
+1. Schemas evolve - MCP always current, fine-tuning goes stale
+2. Less training cost - no need for thousands of SQL examples
+3. Separation of concerns - model reasons, MCP provides facts
+
+Context7 has 12,916 Clickhouse code snippets available via `/clickhouse/clickhouse-docs`.
 
 ### Session 3: Environment Crisis & Recovery (Jan 7, 2026)
 
@@ -168,10 +218,19 @@ A living document tracking learnings, decisions, and progress for our NanoChat d
 - **Dataform SQL:** Analytics transformation logic
 
 ### Future Data (Planned)
-- [ ] Additional query logs
-- [ ] Internal documentation
+
+**High-value for fine-tuning (stable domain knowledge):**
+- [ ] Internal wikis/READMEs - Onboarding docs, architecture decisions
+- [ ] Slack/Discord Q&A - Real questions from team members
+- [ ] Jupyter notebooks - Analytical workflows with explanations
+- [ ] Meeting notes - Technical discussions, decision records
 - [x] ~~Code repositories~~ (Done - 720 examples added)
-- [ ] Support tickets / Q&A
+
+**Better via MCP (evolving/external):**
+- DDLs / table schemas - Change frequently
+- SQL query logs - Can use Context7 for syntax
+- API documentation - Keep in sync via MCP
+- External docs (Clickhouse, Solana, etc.) - Already in Context7
 
 ---
 
@@ -219,8 +278,9 @@ All models available at: https://huggingface.co/victoremnm/nanochat-d34-sft
 - [x] ~~Complete custom SQL SFT training~~ (Done - custom_only_model_000033.pt)
 - [x] ~~Upload new checkpoint to HuggingFace~~ (Done)
 - [x] ~~Add codebase training data~~ (Done - 720 examples, full_custom_model_000055.pt)
-- [ ] Run more epochs for better SQL dialect learning
-- [ ] Add more Clickhouse-specific examples (LIMIT vs TOP, etc.)
+- [x] ~~Run domain-specific evaluation~~ (Done - see Session 4 below)
+- [ ] ~~Run more epochs for better SQL dialect learning~~ **DEFERRED** - use MCP instead
+- [ ] ~~Add more Clickhouse-specific examples~~ **DEFERRED** - use MCP instead
 
 ### Short-term
 - [ ] Push analyst-ai to GitHub private repo
