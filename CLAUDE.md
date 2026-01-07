@@ -175,10 +175,45 @@ Use SSH tunneling: `ssh -L 8000:localhost:8000 ubuntu@<ip>`
 
 | Task | Time | Cost |
 |------|------|------|
-| Mid-training (d34) | ~1-2 hours | ~$3-5 |
-| SFT (d34) | ~30-60 min | ~$2-3 |
+| Mid-training (d34) | ~5.5 hours | ~$14 |
+| SFT (d34) | ~30-60 min | ~$1-2 |
 | Testing | ~10 min | ~$0.50 |
-| **Total** | ~2-3 hours | **~$6-10** |
+| **Total** | ~6.5 hours | **~$16** |
+
+## Uploading Models to HuggingFace
+
+Upload directly from the cloud GPU (much faster than downloading locally first):
+
+```bash
+# Login to HuggingFace
+huggingface-cli login
+
+# Create repo
+huggingface-cli repo create nanochat-d34-sft --type model
+
+# Upload from ~/.cache/nanochat/
+cd ~/.cache/nanochat
+
+hf upload <username>/nanochat-d34-sft tokenizer/ tokenizer/ --repo-type model
+hf upload <username>/nanochat-d34-sft chatsft_checkpoints/d34/model_000700.pt model_000700.pt --repo-type model
+hf upload <username>/nanochat-d34-sft chatsft_checkpoints/d34/meta_000700.json meta_000700.json --repo-type model
+
+# Optional: upload mid-training checkpoint
+hf upload <username>/nanochat-d34-sft mid_checkpoints/d34/model_000813.pt mid_model_000813.pt --repo-type model
+hf upload <username>/nanochat-d34-sft mid_checkpoints/d34/meta_000813.json mid_meta_000813.json --repo-type model
+```
+
+## Downloading from HuggingFace
+
+```bash
+huggingface-cli download victoremnm/nanochat-d34-sft --local-dir ~/nanochat-d34-sft
+
+# Setup directories
+mkdir -p ~/.cache/nanochat/{tokenizer,chatsft_checkpoints/d34}
+cp ~/nanochat-d34-sft/tokenizer/* ~/.cache/nanochat/tokenizer/
+cp ~/nanochat-d34-sft/model_000700.pt ~/.cache/nanochat/chatsft_checkpoints/d34/
+cp ~/nanochat-d34-sft/meta_000700.json ~/.cache/nanochat/chatsft_checkpoints/d34/
+```
 
 ## Links
 
@@ -186,4 +221,5 @@ Use SSH tunneling: `ssh -L 8000:localhost:8000 ubuntu@<ip>`
 - Fork: https://github.com/victoremnm/nanochat
 - PR with fixes: https://github.com/victoremnm/nanochat/pull/1
 - Pretrained d34: https://huggingface.co/karpathy/nanochat-d34
+- Trained SFT model: https://huggingface.co/victoremnm/nanochat-d34-sft
 - WandB dashboard: https://wandb.ai/victoremnm-victor-em-llc/nanochat-sft

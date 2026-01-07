@@ -275,7 +275,31 @@ ssh -L 8000:localhost:8000 ubuntu@<lambda-ip>
 # Open http://localhost:8000
 ```
 
-### 7. Download Models Before Terminating
+### 7. Upload to HuggingFace (Recommended)
+
+Upload directly from the server - much faster than downloading locally:
+
+```bash
+# Login
+huggingface-cli login
+
+# Create repo
+huggingface-cli repo create nanochat-d34-sft --type model
+
+# Upload files
+cd ~/.cache/nanochat
+hf upload <username>/nanochat-d34-sft tokenizer/ tokenizer/ --repo-type model
+hf upload <username>/nanochat-d34-sft chatsft_checkpoints/d34/model_000700.pt model_000700.pt --repo-type model
+hf upload <username>/nanochat-d34-sft chatsft_checkpoints/d34/meta_000700.json meta_000700.json --repo-type model
+
+# Optional: mid-training checkpoint
+hf upload <username>/nanochat-d34-sft mid_checkpoints/d34/model_000813.pt mid_model_000813.pt --repo-type model
+hf upload <username>/nanochat-d34-sft mid_checkpoints/d34/meta_000813.json mid_meta_000813.json --repo-type model
+```
+
+### 8. Alternative: Download via SCP
+
+If you prefer local backup:
 ```bash
 # On server - create tarball
 cd ~/.cache/nanochat
@@ -293,6 +317,26 @@ tar -xzvf nanochat-d34-trained.tar.gz
 cp -r tokenizer ~/.cache/nanochat/
 cp -r mid_checkpoints ~/.cache/nanochat/
 cp -r chatsft_checkpoints ~/.cache/nanochat/
+```
+
+---
+
+## Using Pre-trained SFT Model
+
+Skip training entirely by using our pre-trained model:
+
+```bash
+# Download from HuggingFace
+huggingface-cli download victoremnm/nanochat-d34-sft --local-dir ~/nanochat-d34-sft
+
+# Setup directories
+mkdir -p ~/.cache/nanochat/{tokenizer,chatsft_checkpoints/d34}
+cp ~/nanochat-d34-sft/tokenizer/* ~/.cache/nanochat/tokenizer/
+cp ~/nanochat-d34-sft/model_000700.pt ~/.cache/nanochat/chatsft_checkpoints/d34/
+cp ~/nanochat-d34-sft/meta_000700.json ~/.cache/nanochat/chatsft_checkpoints/d34/
+
+# Run chat
+uv run python -m scripts.chat_web --source=sft --model-tag=d34 --step=700 --temperature=0.6
 ```
 
 ---
@@ -324,3 +368,5 @@ cp -r chatsft_checkpoints ~/.cache/nanochat/
 6. **Download models before terminating** - You'll lose 6+ hours of work otherwise
 
 7. **Monitor with WandB** - Logs may be buffered, WandB shows real-time progress
+
+8. **Upload to HuggingFace from server** - Much faster than downloading locally first (Lambda has ~100MB/s upload)
