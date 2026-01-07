@@ -84,12 +84,36 @@ Mid-training teaches the model conversation structure, reasoning, and domain kno
 ssh ubuntu@<lambda-ip>
 ```
 
-### Firewall Workaround
-Lambda blocks port 8000. Use SSH tunneling:
+### SSH Tunneling for Web Interface
+Lambda/cloud providers block direct port access. Use SSH tunneling:
+
 ```bash
-# From local machine
-ssh -L 8000:localhost:8000 ubuntu@<lambda-ip>
-# Then open http://localhost:8000
+# Terminal 1 (local) - Create tunnel
+ssh -i ~/.ssh/lambda.pem -L 8080:localhost:8080 ubuntu@209-20-159-9
+
+# Terminal 2 (on Lambda via the tunnel) - Start server
+cd ~/nanochat
+uv run python -m scripts.chat_web --source=sft --model-tag=d34 --step=719 --port=8080
+
+# Then open http://localhost:8080 in browser
+```
+
+Alternative: tunnel-only mode (no shell):
+```bash
+ssh -N -L 8080:localhost:8080 ubuntu@209-20-159-9
+```
+
+### Quick Model Test via curl (no tunnel needed)
+Test directly on Lambda without tunneling:
+```bash
+# On Lambda - start server in background
+cd ~/nanochat
+uv run python -m scripts.chat_web --source=sft --model-tag=d34 --step=719 --port=8080 &
+
+# Wait for model to load (~30s), then test
+curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Write a Clickhouse query for top 10 traders by volume"}]}'
 ```
 
 ### Background Training
@@ -222,4 +246,6 @@ cp ~/nanochat-d34-sft/meta_000700.json ~/.cache/nanochat/chatsft_checkpoints/d34
 - PR with fixes: https://github.com/victoremnm/nanochat/pull/1
 - Pretrained d34: https://huggingface.co/karpathy/nanochat-d34
 - Trained SFT model: https://huggingface.co/victoremnm/nanochat-d34-sft
+  - step 700: Base SFT (MMLU 42.6%, ARC-Easy 72%)
+  - step 719: Custom SQL/analytics SFT (MMLU 41.99%, ARC-Easy 73.93%)
 - WandB dashboard: https://wandb.ai/victoremnm-victor-em-llc/nanochat-sft
