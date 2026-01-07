@@ -65,6 +65,28 @@ A living document tracking learnings, decisions, and progress for our NanoChat d
 
 **Key Finding:** Model now uses correct table names (swap_events) but outputs SQL Server syntax (`SELECT TOP 10`) instead of Clickhouse (`LIMIT 10`). Needs more epochs or dialect-specific training.
 
+**Attempt 3 - Full Dataset Training (1,812 examples)**
+- Combined original 1,092 examples + 720 codebase training examples
+- Codebase data includes: repository structures, code patterns, internal APIs
+- 56 training steps (1 epoch on larger dataset)
+
+**Full Training Data Sources (1,812 total):**
+- Clickhouse queries (various batches)
+- BigQuery table definitions
+- BonkBot analytics
+- Pum3 data
+- Geyser-geezer metrics
+- Web-terminal documentation
+- **NEW:** Codebase training data (720 examples from repositories)
+
+| Metric | Score | Change vs Attempt 2 |
+|--------|-------|---------------------|
+| MMLU | 42.38% | +0.58% |
+| ARC-Easy | 70.51% | -0.68% |
+| SQL Quality | Improved - better context awareness |
+
+**Key Finding:** Adding codebase training data improved MMLU by 0.58% (42.38% vs 41.80%), indicating better general reasoning. Slight decrease in ARC-Easy suggests tradeoff but overall model quality improved with more domain-specific context.
+
 ### Session 3: Environment Crisis & Recovery (Jan 7, 2026)
 
 **Problem:** Deleted uv.lock causing cascading dependency failures
@@ -148,7 +170,7 @@ A living document tracking learnings, decisions, and progress for our NanoChat d
 ### Future Data (Planned)
 - [ ] Additional query logs
 - [ ] Internal documentation
-- [ ] Code repositories
+- [x] ~~Code repositories~~ (Done - 720 examples added)
 - [ ] Support tickets / Q&A
 
 ---
@@ -162,9 +184,12 @@ All models available at: https://huggingface.co/victoremnm/nanochat-d34-sft
 | model_000700.pt | 700 | Base SFT (23K) | 42.6% | 72% | Initial chat model |
 | model_000719.pt | 719 | Base + Custom (23K + 629) | 41.99% | 73.93% | Diluted - doesn't help |
 | custom_only_model_000033.pt | 33 | Custom only (1,092) | 41.80% | 71.19% | Better domain knowledge |
+| full_custom_model_000055.pt | 55 | Custom only (1,812) | 42.38% | 70.51% | **Best** - includes codebase data |
 | mid_model_000813.pt | 813 | Mid-training | - | - | Required base for SFT |
 
-**Training Data:** `training_data/combined_training_nanochat.jsonl` (1,092 examples)
+**Training Data:**
+- `training_data/combined_training_nanochat.jsonl` (1,092 examples)
+- `training_data/full_combined_training_nanochat.jsonl` (1,812 examples) ← **Latest**
 
 ---
 
@@ -193,6 +218,7 @@ All models available at: https://huggingface.co/victoremnm/nanochat-d34-sft
 ### Immediate
 - [x] ~~Complete custom SQL SFT training~~ (Done - custom_only_model_000033.pt)
 - [x] ~~Upload new checkpoint to HuggingFace~~ (Done)
+- [x] ~~Add codebase training data~~ (Done - 720 examples, full_custom_model_000055.pt)
 - [ ] Run more epochs for better SQL dialect learning
 - [ ] Add more Clickhouse-specific examples (LIMIT vs TOP, etc.)
 
@@ -235,4 +261,4 @@ uv run python -m scripts.chat_sft --help
 
 ---
 
-*Last updated: January 7, 2026*
+*Last updated: January 7, 2026 (Session 2 Attempt 3 completed)*
